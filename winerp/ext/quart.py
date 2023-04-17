@@ -2,52 +2,40 @@ import asyncio
 import functools
 from types import FunctionType
 from winerp.client import Client
-from winerp.lib.errors import InvalidRouteType
+from winerp.lib.errors import InvalidRouteType, UnauthorizedError
+from winerp.server import Server
+from threading import Thread
 
 
 class WinerpQuart(Client):
-    def __init__(self, app=None, local_name: str = None, host: str = '127.0.0.1', port: int = 13254, run_server_thread=False):
+    def __init__(self, app=None,
+                 local_name: str = None,
+                 host: str = '127.0.0.1',
+                 port: int = 13254,
+                 run_server_thread=False):
         super().__init__(local_name=local_name, host=host, port=port)
         self.local_name = local_name
         self.host = host
         self.port = port
         self.run_server_thread = run_server_thread
+        self.server = None
+        self.UnauthorizedError = UnauthorizedError
 
+        if self.run_server_thread:
+            self.server = Server(self.host, self.port)
+            self.thread = Thread(target=self.server.start)
+            self.thread.start()
+            print(f'Winerp Server has started at {self.host}:{self.port}.')
 
         if app is not None:
             self.init_app(app)
 
+
+
     def init_app(self, app):
         app.before_first_request(self.start)
+        print(f'Winerp Client has started to listen at {self.host}:{self.port} with {self.local_name} local name.')
 
-    def ipc_route(self, name: str = None):
-        """
-        A decorator to register your route. The route name should be unique.
-
-        Raises
-        -------
-            ValueError
-                Route name already exists.
-            InvalidRouteType
-                The function passed is not a coro.
-        """
-
-        def route_decorator(_route_func):
-            if (name is None and _route_func.__name__ in self.__routes) or (name is not None and name in self.__routes):
-                raise ValueError("Route name is already registered!")
-
-            if not asyncio.iscoroutinefunction(_route_func):
-                raise InvalidRouteType("Route function must be a coro.")
-
-            self.__routes[name or _route_func.__name__] = _route_func
-            return _route_func
-
-        if isinstance(name, FunctionType):
-            _route_func = name
-            name = name.__name__
-            return route_decorator(_route_func)
-        else:
-            return route_decorator
 
     def request_decorator(self, route: str, source: str, timeout: int = 60, **kwargs):
         """|coro|
@@ -96,6 +84,7 @@ class WinerpQuart(Client):
             :class:`any`
                 The data associated with the message.
         """
+
         def decorator(func):
             @functools.wraps(func)
             async def wrapper(*args, **func_kwargs):
@@ -111,11 +100,5 @@ class WinerpQuart(Client):
                         request_kwargs[k] = v
                 ipc_data = await self.request(route, source, timeout, **request_kwargs)
                 return await func(*args, ipc_data=ipc_data, **func_kwargs)
-
             return wrapper
-
         return decorator
-
-
-
-
