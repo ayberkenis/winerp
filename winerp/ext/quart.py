@@ -1,5 +1,6 @@
 import asyncio
 import functools
+import inspect
 from types import FunctionType
 from winerp.client import Client
 from winerp.lib.errors import InvalidRouteType, UnauthorizedError
@@ -30,29 +31,42 @@ class WinerpQuart(Client):
         if app is not None:
             self.init_app(app)
 
-
-
     def init_app(self, app):
-        app.before_first_request(self.start)
-        print(f'Winerp Client has started to listen at {self.host}:{self.port} with {self.local_name} local name.')
+        """
+        This callback is for Quart to initialize the extension. It is called by Quart when the extension is registered to the application.
+        Shouldn't be called manually.
 
+        Parameters
+        ----------
+        app
+
+        Returns
+        -------
+
+        """
+        app.before_serving(self.start)
+        print(f'Winerp Client has started to listen at {self.host}:{self.port} with {self.local_name} local name.')
 
     def request_decorator(self, route: str, source: str, timeout: int = 60, **kwargs):
         """|coro|
 
-        Requests the server for a response.
-        Resolves when the response is received matching the UUID.
-        This is designed as a decorator, it should be below @app.route() decorator as it supports positional parameters of the route such as <example>.
-        You don't need to declare positional parameter in the |coro| for the route. You should declare as a keyword argument in the request decorator.
+        Requests the server for a response. Resolves when the response is received matching the UUID. This is
+        designed as a decorator, it should be below @app.route() decorator as it supports positional parameters of
+        the route such as <example>. You don't need to declare positional parameter in the |coro| for the route. You
+        should declare as a keyword argument in the request decorator.
+
+        Also, `data` is the keyword will be used to pass the data from the IPC request to the route function. Anything
+        else will be passed to the request function.
+
 
         Usage
         ------
         @app.route('/test/<guild_id>')
-        @app.ipc_.request(source='bot', route='get_guild_data', gid='<guild_id>')
-        async def handle_request(ipc_data):
-            if ipc_data is not None:
-                print('ipc data arrived', ipc_data)
-                return ipc_data
+        @winerp.request_decorator(source='bot', route='get_guild_data', gid='<guild_id>')
+        async def handle_request(data):
+            if data is not None:
+                print('ipc data arrived', data)
+                return data
             else:
                 return 'no ipc data error'
 
@@ -94,11 +108,13 @@ class WinerpQuart(Client):
                     for fk, fv in func_kwargs.items():
                         if v == f'<{fk}>':
                             request_kwargs[k] = fv
-                            del func_kwargs[fk]
                             break
                     else:
+
                         request_kwargs[k] = v
-                ipc_data = await self.request(route, source, timeout, **request_kwargs)
-                return await func(*args, ipc_data=ipc_data, **func_kwargs)
+                data = await self.request(route, source, timeout, **request_kwargs)
+                return await func(*args, **func_kwargs, data=data)
+
             return wrapper
+
         return decorator
